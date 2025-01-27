@@ -9,6 +9,11 @@ ISO_FILE=""
 ISO_URL=""
 PRESEED_FILE="/tmp/preseed.cfg"
 
+# IPMI相关变量
+IPMI_IP=""
+IPMI_USER=""
+IPMI_PASS=""
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -27,6 +32,45 @@ error_exit() {
 # 日志函数
 log_message() {
     echo -e "${CYAN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
+
+# IPMI检测函数
+check_ipmi() {
+    log_message "检查IPMI支持..."
+    if ! command -v ipmitool >/dev/null 2>&1; then
+        log_message "安装 ipmitool..."
+        apt-get update && apt-get install -y ipmitool
+    fi
+    
+    if ipmitool mc info >/dev/null 2>&1; then
+        log_message "检测到本地IPMI支持"
+        return 0
+    else
+        log_message "未检测到IPMI支持"
+        return 1
+    fi
+}
+
+# IPMI配置函数
+configure_ipmi() {
+    clear
+    echo -e "${BLUE}┌──────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│          IPMI 配置                       │${NC}"
+    echo -e "${BLUE}├──────────────────────────────────────────┤${NC}"
+    
+    read -p "请输入IPMI IP地址: " IPMI_IP
+    read -p "请输入IPMI用户名: " IPMI_USER
+    read -s -p "请输入IPMI密码: " IPMI_PASS
+    echo
+    
+    echo -e "\n测试IPMI连接..."
+    if ipmitool -I lanplus -H $IPMI_IP -U $IPMI_USER -P $IPMI_PASS chassis status >/dev/null 2>&1; then
+        echo -e "${GREEN}IPMI连接成功！${NC}"
+        return 0
+    else
+        echo -e "${RED}IPMI连接失败，请检查配置${NC}"
+        return 1
+    fi
 }
 
 # 绘制菜单函数
@@ -62,7 +106,7 @@ show_help() {
     echo -e "${BLUE}│${NC} ${YELLOW}2. 重新安装系统：${NC}                        ${BLUE}│${NC}"
     echo -e "${BLUE}│${NC}   - 支持多个 Linux 发行版              ${BLUE}│${NC}"
     echo -e "${BLUE}│${NC}   - 自动配置 LVM                        ${BLUE}│${NC}"
-    echo -e "${BLUE}│${NC}   - 生成自动安装 ISO                    ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}   - 支持IPMI远程重装                    ${BLUE}│${NC}"
     echo -e "${BLUE}│${NC}                                          ${BLUE}│${NC}"
     echo -e "${BLUE}│${NC} ${YELLOW}3. 系统信息：${NC}                            ${BLUE}│${NC}"
     echo -e "${BLUE}│${NC}   - 显示磁盘使用情况                    ${BLUE}│${NC}"
@@ -71,6 +115,7 @@ show_help() {
     echo
     read -n 1 -s -r -p "按任意键返回主菜单..."
 }
+
 # 系统选择函数
 select_os_version() {
     echo "请选择要安装的系统版本："
@@ -130,6 +175,70 @@ select_os_version() {
 
     echo "已选择: $ISO_FILE"
     echo "下载地址: $ISO_URL"
+}
+
+# 检测云服务商
+detect_cloud_provider() {
+    # 检测是否为阿里云
+    if curl -s http://100.100.100.200/latest/meta-data/ >/dev/null 2>&1; then
+        echo "aliyun"
+    # 检测是否为腾讯云
+    elif curl -s http://metadata.tencentyun.com/latest/meta-data/ >/dev/null 2>&1; then
+        echo "tencent"
+    # 检测是否为华为云
+    elif curl -s http://169.254.169.254/latest/meta-data/ >/dev/null 2>&1; then
+        echo "huawei"
+    else
+        echo "unknown"
+    fi
+}
+
+# 云平台重装指南
+prepare_cloud_reinstall() {
+    clear
+    echo -e "${BLUE}┌──────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│          云服务器重装指南               │${NC}"
+    echo -e "${BLUE}├──────────────────────────────────────────┤${NC}"
+    
+    # 检测云服务商
+    local provider=$(detect_cloud_provider)
+    
+    case $provider in
+        "aliyun")
+            echo -e "${YELLOW}检测到阿里云服务器，请按以下步骤操作：${NC}"
+            echo "1. 登录阿里云控制台"
+            echo "2. 找到当前实例"
+            echo "3. 选择'更多' -> '重置实例'"
+            echo "4. 选择'自定义镜像'"
+            ;;
+        "tencent")
+            echo -e "${YELLOW}检测到腾讯云服务器，请按以下步骤操作：${NC}"
+            echo "1. 登录腾讯云控制台"
+            echo "2. 找到当前实例"
+            echo "3. 选择'更多操作' -> '重装系统'"
+            echo "4. 选择'服务市场镜像'"
+            ;;
+        "huawei")
+            echo -e "${YELLOW}检测到华为云服务器，请按以下步骤操作：${NC}"
+            echo "1. 登录华为云控制台"
+            echo "2. 找到当前实例"
+            echo "3. 选择'操作' -> '重装系统'"
+            echo "4. 选择'公共镜像'"
+            ;;
+        *)
+            echo -e "${YELLOW}未检测到具体云服务商，通用重装步骤：${NC}"
+            echo "1. 登录云服务商控制台"
+            echo "2. 找到服务器重装或重置选项"
+            echo "3. 选择 Ubuntu/Debian 系统"
+            echo "4. 确保选择启用 LVM 选项"
+            ;;
+    esac
+    
+    echo -e "\n${GREEN}配置建议：${NC}"
+    echo "- 系统盘大小：建议50GB以上"
+    echo "- 选择'启用LVM'"
+    
+    read -n 1 -s -r -p "按任意键返回主菜单..."
 }
 
 # 创建 Preseed 配置
@@ -207,6 +316,7 @@ d-i grub-installer/bootdev string /dev/sda
 d-i finish-install/reboot_in_progress note
 EOF
 }
+
 # 创建 Kickstart 配置（用于 Rocky Linux）
 create_kickstart() {
     log_message "创建 Kickstart 配置文件"
@@ -270,7 +380,7 @@ EOF
 
 # 检查系统是否使用 LVM
 check_system_lvm() {
-    if pvs | grep -q "/dev/sda"; then
+    if pvs | grep -q "/dev/"; then
         log_message "系统已使用 LVM"
         return 0
     else
@@ -319,7 +429,7 @@ extend_existing_lvm() {
     fi
 }
 
-# 准备自动安装介质
+# 准备自动安装环境
 prepare_auto_install() {
     log_message "准备自动安装环境"
     
@@ -371,6 +481,7 @@ prepare_auto_install() {
 
     log_message "自动安装 ISO 已创建: auto-install.iso"
 }
+
 # 修改 Ubuntu/Debian 引导配置
 modify_ubuntu_boot() {
     cat > iso_new/isolinux/txt.cfg << EOF
@@ -420,12 +531,47 @@ show_menu() {
                 ;;
             2)
                 echo -e "${YELLOW}警告：此操作将删除所有数据！${NC}"
-                read -p "是否继续？(y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    prepare_auto_install
-                    read -n 1 -s -r -p "按任意键继续..."
+                echo -e "检测系统重装方式..."
+                
+                if check_ipmi; then
+                    echo -e "\n检测到IPMI支持，可以使用IPMI进行远程重装"
+                    echo -e "1. 使用IPMI重装（推荐）"
+                    echo -e "2. 使用云平台重装"
+                    echo -e "3. 取消操作"
+                    
+                    read -p "请选择重装方式 [1-3]: " reinstall_choice
+                    case $reinstall_choice in
+                        1)
+                            if configure_ipmi; then
+                                prepare_auto_install
+                                echo "设置从虚拟光驱启动..."
+                                ipmitool -I lanplus -H $IPMI_IP -U $IPMI_USER -P $IPMI_PASS chassis bootdev cdrom
+                                
+                                echo -e "${YELLOW}重要说明：${NC}"
+                                echo "1. ISO已生成: auto-install.iso"
+                                echo "2. 请登录IPMI Web界面"
+                                echo "3. 找到虚拟媒体/虚拟光驱选项"
+                                echo "4. 挂载auto-install.iso文件"
+                                
+                                read -p "已完成ISO挂载？(y/n) " -n 1 -r
+                                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                                    echo "重启服务器..."
+                                    ipmitool -I lanplus -H $IPMI_IP -U $IPMI_USER -P $IPMI_PASS power reset
+                                fi
+                            fi
+                            ;;
+                        2)
+                            prepare_cloud_reinstall
+                            ;;
+                        3)
+                            echo "操作已取消"
+                            ;;
+                    esac
+                else
+                    echo -e "\n未检测到IPMI支持，使用云平台重装方式"
+                    prepare_cloud_reinstall
                 fi
+                read -n 1 -s -r -p "按任意键继续..."
                 ;;
             3)
                 clear
